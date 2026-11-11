@@ -1,36 +1,76 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Shots Laundry
 
-## Getting Started
+Website for **Shots Laundry**, a premium laundry service.
 
-First, run the development server:
+Built with Next.js (App Router), React, TypeScript, Tailwind CSS v4, GSAP + ScrollTrigger and Lucide icons.
+
+## Getting started
+
+Requires Node.js 20.9+ (developed on Node 22).
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env.local   # optional, set NEXT_PUBLIC_SITE_URL
+npm run dev                  # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Scripts
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Command             | Description                                     |
+| ------------------- | ----------------------------------------------- |
+| `npm run dev`       | Start the development server                    |
+| `npm run build`     | Create a production build                       |
+| `npm run start`     | Serve the production build                      |
+| `npm run lint`      | Run ESLint                                      |
+| `npm run typecheck` | Generate route types and run the TypeScript check |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Project structure
 
-## Learn More
+```
+src/
+├── app/                  Routes, root layout, metadata, loading/error/404
+├── components/
+│   ├── layout/           Navbar, Footer, MobileMenu
+│   ├── sections/         HeroSection, LaundryJourney, Services, Process,
+│   │                     WhyChooseUs, Testimonials, Contact, Booking
+│   ├── animations/       AnimationProvider, SmoothScroll, ScrollProgress
+│   └── ui/               Button, Container, SectionHeading
+├── hooks/                Reusable React hooks
+├── lib/                  Utilities (`cn`) and the GSAP entry point
+├── config/               Brand tokens, site config, journey stages
+├── types/                Shared TypeScript types
+└── styles/               Tailwind theme tokens (`theme.css`)
 
-To learn more about Next.js, take a look at the following resources:
+public/
+├── images/brand/         Shots Laundry logo
+├── images/laundry-journey/  The five main scroll-scene JPGs (config: src/config/journey.ts)
+├── images/elements/  Individual transparent PNG elements (config: src/config/elements.ts)
+├── icons/
+└── fonts/                Self-hosted brand fonts
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Conventions
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- **Components:** PascalCase file names matching the export (`HeroSection.tsx`). Server Components by default; add `"use client"` only where interactivity or GSAP is needed.
+- **Imports:** use the `@/` alias for anything under `src/` (`@/config/brand`).
+- **Brand colours:** defined in `src/styles/theme.css` (Tailwind utilities like `bg-brand-navy`) and mirrored in `src/config/brand.ts` for JavaScript. Keep both in sync.
+- **GSAP:** import `gsap` and `ScrollTrigger` from `@/lib/gsap`, which registers plugins once.
 
-## Deploy on Vercel
+## Brand colours
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+| Token              | Hex       | Tailwind utility suffix |
+| ------------------ | --------- | ----------------------- |
+| Midnight Navy      | `#06175E` | `brand-navy`            |
+| Bright Yellow      | `#FFF000` | `brand-yellow`          |
+| White              | `#FFFFFF` | `brand-white`           |
+| Light Blue         | `#EAF5FC` | `brand-light-blue`      |
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Laundry journey stages
+
+Defined in `src/config/journey.ts`, each mapped to `public/images/laundry-journey/shots-laundry-website-images-0N.jpg`:
+
+1. Dirty Clothes
+2. Washing Machine
+3. Ironing
+4. Delivery
+5. Fresh Clothes

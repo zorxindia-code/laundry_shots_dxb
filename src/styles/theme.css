@@ -1,0 +1,11 @@
+/*
+ * Shots Laundry design tokens for Tailwind CSS v4.
+ * Generates utilities such as `bg-brand-navy`, `text-brand-yellow`.
+ * Keep in sync with `src/config/brand.ts`.
+ */
+@theme {
+  --color-brand-navy: #06175e;
+  --color-brand-yellow: #fff000;
+  --color-brand-white: #ffffff;
+  --color-brand-light-blue: #eaf5fc;
+}
