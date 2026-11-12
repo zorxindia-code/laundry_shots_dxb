@@ -14,12 +14,18 @@ export default function ErrorBoundary({
   }, [error]);
 
   return (
-    <main className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
-      <h1 className="text-2xl font-semibold">Something went wrong</h1>
+    <main
+      id="main-content"
+      data-nav-tone="navy"
+      className="flex min-h-svh flex-1 flex-col items-center justify-center gap-8 bg-brand-navy px-5 text-center text-brand-white"
+    >
+      <h1 className="text-[clamp(2rem,6vw,4rem)] font-bold uppercase leading-[0.9] tracking-[-0.04em]">
+        Something went wrong
+      </h1>
       <button
         type="button"
         onClick={() => retry()}
-        className="rounded-md bg-brand-navy px-4 py-2 text-brand-white"
+        className="min-h-12 rounded-full bg-brand-yellow px-7 text-[0.72rem] font-semibold uppercase tracking-[0.22em] text-brand-navy transition-colors hover:bg-brand-white"
       >
         Try again
       </button>

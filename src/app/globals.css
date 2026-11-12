@@ -1,9 +1,10 @@
 @import "tailwindcss";
 @import "../styles/theme.css";
 
+/* Midnight navy is the dominant brand surface (≈65%). */
 :root {
-  --background: var(--color-brand-white);
-  --foreground: var(--color-brand-navy);
+  --background: var(--color-brand-navy);
+  --foreground: var(--color-brand-white);
 }
 
 @theme inline {
@@ -17,4 +18,96 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+/* Hash links (e.g. #enquiry) land below the fixed navigation. */
+html {
+  scroll-padding-top: 6rem;
+}
+
+::selection {
+  background: var(--color-brand-yellow);
+  color: var(--color-brand-navy);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Motion                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * Hero entrance items (IntroReveal) start hidden only when JS is running
+ * (`data-js` is set by an inline script before first paint). If the intro
+ * never runs, the fallback animation reveals them after a moment.
+ */
+html[data-js] [data-intro] {
+  opacity: 0;
+  animation: intro-fallback 0s linear 3.5s forwards;
+}
+
+@keyframes intro-fallback {
+  to {
+    opacity: 1;
+  }
+}
+
+/* The frame-sequence loader needs JavaScript; without it the first-frame poster shows. */
+html:not([data-js]) [data-frames-loader] {
+  display: none;
+}
+
+/* Route entrance (PageTransition): opacity only. */
+.page-enter {
+  animation: page-enter 0.6s ease-out backwards;
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Navigation entrance on first load. */
+.nav-enter {
+  animation: nav-enter 0.9s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+@keyframes nav-enter {
+  from {
+    opacity: 0;
+    translate: 0 -0.75rem;
+  }
+}
+
+/* Gentle float for decorative visuals. */
+@keyframes float {
+  50% {
+    translate: 0 -0.9rem;
+  }
+}
+
+/* Scroll indicator: a dot travelling down a hairline. */
+@keyframes scroll-cue {
+  0% {
+    translate: 0 -100%;
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    translate: 0 300%;
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-js] [data-intro] {
+    opacity: 1;
+    animation: none;
+  }
+
+  .page-enter,
+  .nav-enter {
+    animation: none;
+  }
 }

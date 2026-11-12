@@ -24,20 +24,30 @@ npm run dev                  # http://localhost:3000
 | `npm run lint`      | Run ESLint                                      |
 | `npm run typecheck` | Generate route types and run the TypeScript check |
 
+## Routes
+
+| Route         | Page                                                                                   |
+| ------------- | -------------------------------------------------------------------------------------- |
+| `/`           | Cinematic landing page: hero, The Shots Difference, services preview, experience and contact CTAs |
+| `/experience` | The laundry journey video as a scroll-controlled frame sequence (`LaundryFrameSequence`) and a closing CTA to Contact |
+| `/contact`    | Editorial contact page: details, enquiry form, closing CTA                             |
+
 ## Project structure
 
 ```
 src/
-├── app/                  Routes, root layout, metadata, loading/error/404
+├── app/                  Routes (/, /experience, /contact), root layout + navbar,
+│                         template (page transition), sitemap/robots, 404/error
+│   └── contact/actions.ts   Enquiry server action (form delivery boundary)
 ├── components/
-│   ├── layout/           Navbar, Footer, MobileMenu
-│   ├── sections/         HeroSection, LaundryJourney, Services, Process,
-│   │                     WhyChooseUs, Testimonials, Contact, Booking
-│   ├── animations/       AnimationProvider, SmoothScroll, ScrollProgress
-│   └── ui/               Button, Container, SectionHeading
-├── hooks/                Reusable React hooks
-├── lib/                  Utilities (`cn`) and the GSAP entry point
-├── config/               Brand tokens, site config, journey stages
+│   ├── layout/           Navbar, Footer, PageTransition
+│   ├── sections/         Page sections incl. LaundryFrameSequence (the journey)
+│   ├── animations/       IntroReveal, ScrollReveal, FloatingVisual (GSAP)
+│   └── ui/               ButtonLink, CroppedImage, ProductImage, Logo, SplitHeading, …
+├── lib/                  Utilities (`cn`), the GSAP entry point, enquiry validation,
+│                         frame-store (progressive frame loader + bounded decode cache)
+├── config/               Brand tokens, site/nav/contact details, journey stages,
+│                         elements, services, scene crops
 ├── types/                Shared TypeScript types
 └── styles/               Tailwind theme tokens (`theme.css`)
 
@@ -45,9 +55,39 @@ public/
 ├── images/brand/         Shots Laundry logo
 ├── images/laundry-journey/  The five main scroll-scene JPGs (config: src/config/journey.ts)
 ├── images/elements/  Individual transparent PNG elements (config: src/config/elements.ts)
+├── images/laundry-frames/  Lossless WebP frames of videos/Web.mp4 (generated)
+├── videos/Web.mp4    Source of the journey animation (never modified)
 ├── icons/
 └── fonts/                Self-hosted brand fonts
 ```
+
+Images are never edited: the logo, PNG elements and scene close-ups are cropped
+in CSS from the original files (`CroppedImage`).
+
+## Journey frames
+
+`/experience` plays `public/videos/Web.mp4` frame by frame from lossless WebP
+frames, driven by scroll (one canvas, GSAP ScrollTrigger). After replacing the
+video, regenerate the frames, the manifest (`src/config/video-frames.ts`) and the
+validation report (`docs/laundry-frames-report.md`):
+
+```bash
+node scripts/extract-frames.mjs           # extract + encode + validate + manifest
+node scripts/extract-frames.mjs --verify  # re-validate existing frames only
+```
+
+Requires FFmpeg (`ffmpeg`, `ffprobe`) and libwebp (`cwebp`, `dwebp`, `webpinfo`).
+
+## Before launch
+
+1. **Business details** — fill in `contactDetails` and `socialLinks` in
+   `src/config/site.ts` with verified information. Until then the contact page
+   shows "To be confirmed" and WhatsApp CTAs stay hidden.
+2. **Enquiry delivery** — set `CONTACT_FORM_ENDPOINT` (and optionally
+   `CONTACT_FORM_TOKEN`) on the server; see `.env.example`. Without it the form
+   tells visitors online enquiries aren't connected and sends nothing.
+3. **Services** — confirm the categories in `src/config/services.ts`.
+4. **Site URL** — set `NEXT_PUBLIC_SITE_URL` for canonical/Open Graph URLs.
 
 ## Conventions
 
@@ -64,6 +104,7 @@ public/
 | Bright Yellow      | `#FFF000` | `brand-yellow`          |
 | White              | `#FFFFFF` | `brand-white`           |
 | Light Blue         | `#EAF5FC` | `brand-light-blue`      |
+| Soft Blue          | `#A8B8E0` | `brand-soft-blue`       |
 
 ## Laundry journey stages
 
