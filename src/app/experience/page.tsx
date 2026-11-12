@@ -20,7 +20,7 @@ export const metadata: Metadata = {
 export default function ExperiencePage() {
   return (
     <>
-      <main id="main-content" className="flex-1">
+      <main className="flex-1">
         {/* The laundry journey video as a scroll-controlled frame sequence, then the closing CTA. */}
         <div id="journey">
           <LaundryFrameSequence />

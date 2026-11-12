@@ -44,6 +44,8 @@ export interface ContactDetails {
   hours: readonly string[] | null;
   /** Optional maps link for the address. */
   mapUrl: string | null;
+  /** Google Maps embed URL (the `src` of the "Share → Embed a map" iframe). */
+  mapEmbedUrl: string | null;
 }
 
 export const contactDetails: ContactDetails = {
@@ -53,6 +55,8 @@ export const contactDetails: ContactDetails = {
   address: null, // TODO: verified business address
   hours: null, // TODO: verified opening hours
   mapUrl: null, // TODO: optional maps link
+  mapEmbedUrl:
+    "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d4638.302088145405!2d55.3927519!3d24.9843805!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3e5f7bd53cd76215%3A0x92ccc951ddec464!2sShots%20Laundry!5e1!3m2!1sen!2sin!4v1794472731508!5m2!1sen!2sin",
 };
 
 export interface SocialLink {

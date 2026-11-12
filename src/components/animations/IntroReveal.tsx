@@ -15,9 +15,13 @@ import { gsap } from "@/lib/gsap";
  * Items start hidden via CSS (`html[data-js] [data-intro]`, see globals.css) so
  * nothing flashes before hydration; a CSS fallback reveals them if this never
  * runs. Reduced motion: shown immediately, no movement.
+ *
+ * Plays once per page lifetime: when a visited page is shown again (Next.js
+ * keeps it with React Activity, which re-runs effects), items appear at once.
  */
 export function IntroReveal({ children, className }: { children: ReactNode; className?: string }) {
   const ref = useRef<HTMLDivElement>(null);
+  const played = useRef(false);
 
   useLayoutEffect(() => {
     const root = ref.current;
@@ -31,10 +35,11 @@ export function IntroReveal({ children, className }: { children: ReactNode; clas
       },
       (context) => {
         const items = Array.from(root.querySelectorAll<HTMLElement>("[data-intro]"));
-        if (context.conditions?.reduceMotion) {
+        if (context.conditions?.reduceMotion || played.current) {
           gsap.set(items, { opacity: 1 });
           return;
         }
+        played.current = true;
 
         const tl = gsap.timeline({ defaults: { ease: "power3.out" } });
         items.forEach((el) => {
@@ -49,13 +54,13 @@ export function IntroReveal({ children, className }: { children: ReactNode; clas
             case "visual":
               tl.fromTo(
                 el,
-                { opacity: 0, y: 70, scale: 1.05 },
+                { opacity: 0.01, y: 70, scale: 1.05 }, // 0.01: see globals.css (paint metrics)
                 { opacity: 1, y: 0, scale: 1, duration: 1.7, ease: "power3.out" },
                 at,
               );
               break;
             default:
-              tl.fromTo(el, { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: 0.9 }, at);
+              tl.fromTo(el, { opacity: 0.01, y: 18 }, { opacity: 1, y: 0, duration: 0.9 }, at);
           }
         });
       },

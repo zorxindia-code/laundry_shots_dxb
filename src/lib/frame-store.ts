@@ -8,6 +8,9 @@
  *   cache bounded by a byte budget — never one bitmap per frame.
  * - Nothing here touches React state; callers poll `bitmap()` from rAF and are
  *   notified via `onChange` when something new is available.
+ * - Lifetime: shared per sequence via `acquireFrameStore` / `releaseFrameStore`,
+ *   so leaving the page and coming back reuses everything already downloaded
+ *   (see the bottom of this file).
  */
 
 export interface FrameStoreOptions {
@@ -36,7 +39,7 @@ export class FrameStore {
   private readonly decodeConcurrency: number;
   private readonly decodedBudget: number;
   private readonly maxBitmaps: number;
-  private readonly onChange?: () => void;
+  private onChange?: () => void;
 
   private readonly blobs: (Blob | undefined)[];
   private readonly fetching = new Set<number>();
@@ -51,6 +54,7 @@ export class FrameStore {
   private decodeSize: { width: number; height: number } | null = null;
   private generation = 0; // bumps when the decode size changes
   private disposed = false;
+  private paused = false;
 
   loadedCount = 0;
   loadedBytes = 0;
@@ -78,6 +82,35 @@ export class FrameStore {
 
   start() {
     this.pump();
+  }
+
+  /** Replace the change listener (the page that currently shows the sequence). */
+  setListener(listener: (() => void) | undefined) {
+    this.onChange = listener;
+  }
+
+  /** Stop starting new downloads/decodes (in-flight ones finish). */
+  pause() {
+    this.paused = true;
+  }
+
+  resume() {
+    this.paused = false;
+    this.pump();
+  }
+
+  get isDisposed() {
+    return this.disposed;
+  }
+
+  /** Release decoded bitmaps down to `keep` (most recently used first), e.g. while hidden. */
+  trim(keep: number) {
+    for (const [index, bitmap] of this.bitmaps) {
+      if (this.bitmaps.size <= keep) break;
+      if (index === this.displayed) continue;
+      bitmap.close();
+      this.bitmaps.delete(index);
+    }
   }
 
   /** Where the scroll position is heading: reprioritises downloads. */
@@ -141,7 +174,7 @@ export class FrameStore {
   /* ---------------------------------------------------------------------- */
 
   private pump() {
-    if (this.disposed) return;
+    if (this.disposed || this.paused) return;
     while (this.fetching.size < this.fetchConcurrency) {
       const next = this.nextToFetch();
       if (next === -1) break;
@@ -258,4 +291,53 @@ export class FrameStore {
       this.bitmaps.delete(index);
     }
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Shared ownership                                                          */
+/* -------------------------------------------------------------------------- */
+/*
+ * Pages are hidden (React Activity) or unmounted on navigation, which tears
+ * down their effects. The store therefore lives here, keyed by sequence +
+ * version, instead of in a component: returning to the page reuses every frame
+ * already downloaded (and the decoded ones still cached) with no new requests.
+ *
+ * While no page shows it, the store is paused and trimmed to a few decoded
+ * frames; if nobody re-acquires it within `idleMs`, it is disposed so the
+ * encoded frames don't stay in memory indefinitely.
+ */
+
+interface SharedEntry {
+  store: FrameStore;
+  users: number;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
+const shared = new Map<string, SharedEntry>();
+
+export function acquireFrameStore(key: string, create: () => FrameStore): FrameStore {
+  let entry = shared.get(key);
+  if (!entry || entry.store.isDisposed) {
+    entry = { store: create(), users: 0, timer: null };
+    shared.set(key, entry);
+  }
+  if (entry.timer) clearTimeout(entry.timer);
+  entry.timer = null;
+  entry.users++;
+  return entry.store;
+}
+
+export function releaseFrameStore(key: string, { idleMs, keepDecoded }: { idleMs: number; keepDecoded: number }) {
+  const entry = shared.get(key);
+  if (!entry) return;
+  entry.users = Math.max(0, entry.users - 1);
+  if (entry.users > 0) return;
+  entry.store.setListener(undefined);
+  entry.store.pause();
+  entry.store.trim(keepDecoded);
+  entry.timer = setTimeout(() => {
+    if (entry.users > 0) return;
+    entry.store.dispose();
+    shared.delete(key);
+  }, idleMs);
 }

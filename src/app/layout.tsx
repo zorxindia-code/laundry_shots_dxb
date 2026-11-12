@@ -85,7 +85,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           Skip to content
         </a>
         <Navbar />
-        {children}
+        {/* One skip-link target for the whole app: visited pages stay in the DOM
+            (hidden by React Activity), so a per-page id would be duplicated. */}
+        <div id="main-content" tabIndex={-1} className="flex flex-1 flex-col outline-none">
+          {children}
+        </div>
       </body>
     </html>
   );

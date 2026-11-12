@@ -7,7 +7,7 @@ import { useLayoutEffect, useRef } from "react";
 import { Logo } from "@/components/ui/Logo";
 import { journeyStages } from "@/config/journey";
 import { frameSrc, laundryFrames, type FrameBands } from "@/config/video-frames";
-import { FrameStore } from "@/lib/frame-store";
+import { acquireFrameStore, FrameStore, releaseFrameStore } from "@/lib/frame-store";
 import { gsap, ScrollTrigger } from "@/lib/gsap";
 import { cn, formatStep } from "@/lib/utils";
 
@@ -54,6 +54,25 @@ const MAX_DECODED = 48;
 const MIN_FILL_BAND = 12;
 
 const SCENE_LABELS = SCENES.length === journeyStages.length;
+
+/**
+ * Content version of the frame set (hash of the generated manifest: sizes,
+ * per-frame colour bands, scenes). Frame URLs carry it as `?v=…`, so they can
+ * be cached as immutable: regenerated frames get new URLs automatically.
+ */
+const FRAME_VERSION = (() => {
+  const text = JSON.stringify([laundryFrames.count, laundryFrames.totalBytes, laundryFrames.subject, laundryFrames.scenes, laundryFrames.bands]);
+  let hash = 0x811c9dc5; // FNV-1a
+  for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193);
+  return (hash >>> 0).toString(36);
+})();
+const versionedFrameSrc = (index: number) => `${frameSrc(index)}?v=${FRAME_VERSION}`;
+
+/** Shared frame store key, and how long it survives once no page shows it. */
+const STORE_KEY = `laundry-frames:${FRAME_VERSION}`;
+const STORE_IDLE_MS = 10 * 60 * 1000;
+/** Decoded frames kept while the page is hidden (the rest are released). */
+const HIDDEN_DECODED = 6;
 
 const isYellow = (hex: string) => {
   const r = parseInt(hex.slice(1, 3), 16);
@@ -122,16 +141,22 @@ export function LaundryFrameSequence() {
     let ready = false;
     let activeScene = -1;
 
-    const store = new FrameStore({
-      count: FRAME_COUNT,
-      src: frameSrc,
-      required: REQUIRED_FRAMES,
-      decodedBudget: DECODED_BUDGET,
-      maxBitmaps: MAX_DECODED,
-      onChange: () => {
-        updateLoading();
-        schedule();
-      },
+    // Shared across visits: returning to the page reuses downloaded frames.
+    const store = acquireFrameStore(
+      STORE_KEY,
+      () =>
+        new FrameStore({
+          count: FRAME_COUNT,
+          src: versionedFrameSrc,
+          required: REQUIRED_FRAMES,
+          decodedBudget: DECODED_BUDGET,
+          maxBitmaps: MAX_DECODED,
+        }),
+    );
+    const wasReady = store.ready;
+    store.setListener(() => {
+      updateLoading();
+      schedule();
     });
 
     /* ---------------- layout ---------------- */
@@ -140,8 +165,15 @@ export function LaundryFrameSequence() {
       cssW = stage.clientWidth;
       cssH = stage.clientHeight;
       dpr = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width = Math.round(cssW * dpr);
-      canvas.height = Math.round(cssH * dpr);
+      const backingW = Math.round(cssW * dpr);
+      const backingH = Math.round(cssH * dpr);
+      // Resizing clears the canvas: only do it when the size really changed
+      // (on a return visit the last drawn frame stays until the next one).
+      const resized = canvas.width !== backingW || canvas.height !== backingH;
+      if (resized) {
+        canvas.width = backingW;
+        canvas.height = backingH;
+      }
       // Fit: the frame is never stretched, and its content (every non-
       // background pixel across all frames, `laundryFrames.subject`) is never
       // cropped. At minimum the whole frame fits (contain); on narrower screens
@@ -162,7 +194,7 @@ export function LaundryFrameSequence() {
       // Decode at the drawn size in device pixels (never above the source).
       const decodeScale = Math.min(1, (w * dpr) / SOURCE_W);
       store.setDecodeSize(SOURCE_W * decodeScale, SOURCE_H * decodeScale);
-      drawn = -1;
+      if (resized) drawn = -1;
       schedule();
     };
 
@@ -283,12 +315,15 @@ export function LaundryFrameSequence() {
         section.dataset.framesReady = "true";
         loader?.setAttribute("aria-busy", "false");
         if (loader) {
-          gsap.to(loader, {
-            autoAlpha: 0,
-            duration: reduceMotion ? 0 : 0.8,
-            ease: "power2.out",
-            delay: reduceMotion ? 0 : 0.2,
-          });
+          // Frames already in hand (return visit): no loading transition.
+          if (wasReady) gsap.set(loader, { autoAlpha: 0 });
+          else
+            gsap.to(loader, {
+              autoAlpha: 0,
+              duration: reduceMotion ? 0 : 0.8,
+              ease: "power2.out",
+              delay: reduceMotion ? 0 : 0.2,
+            });
         }
         current = target; // start exactly where the scroll position is
         schedule();
@@ -318,14 +353,15 @@ export function LaundryFrameSequence() {
     resize.observe(stage);
     measure();
     store.focus(target, 1);
-    store.start();
+    store.resume();
     updateLoading();
 
     return () => {
       cancelAnimationFrame(raf);
       resize.disconnect();
       trigger.kill();
-      store.dispose();
+      // Hidden or unmounted: keep the downloaded frames for the next visit.
+      releaseFrameStore(STORE_KEY, { idleMs: STORE_IDLE_MS, keepDecoded: HIDDEN_DECODED });
       if (loader) gsap.killTweensOf(loader);
     };
   }, []);
@@ -350,7 +386,7 @@ export function LaundryFrameSequence() {
         {/* First frame, shown until the canvas paints (no blank stage, no layout shift). */}
         <div data-frames-poster aria-hidden className="absolute inset-0 transition-opacity duration-300">
           <Image
-            src={frameSrc(1)}
+            src={versionedFrameSrc(1)}
             alt=""
             width={SOURCE_W}
             height={SOURCE_H}

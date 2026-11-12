@@ -15,7 +15,6 @@ export default function ErrorBoundary({
 
   return (
     <main
-      id="main-content"
       data-nav-tone="navy"
       className="flex min-h-svh flex-1 flex-col items-center justify-center gap-8 bg-brand-navy px-5 text-center text-brand-white"
     >

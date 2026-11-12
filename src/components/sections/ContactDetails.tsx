@@ -20,7 +20,7 @@ function Pending() {
  * appears once a number is set.
  */
 export function ContactDetails() {
-  const { phone, whatsapp, email, address, hours, mapUrl } = contactDetails;
+  const { phone, whatsapp, email, address, hours, mapUrl, mapEmbedUrl } = contactDetails;
 
   const rows: { label: string; value: ReactNode }[] = [
     { label: "Phone", value: phone ? <a href={telHref(phone)} className={linkClass}>{phone}</a> : <Pending /> },
@@ -97,6 +97,25 @@ export function ContactDetails() {
           </div>
         )}
       </dl>
+
+      {mapEmbedUrl && (
+        <figure data-reveal className="mt-10">
+          <div className="relative overflow-hidden border border-brand-white/10 bg-brand-white/5">
+            <iframe
+              src={mapEmbedUrl}
+              title="Shots Laundry on Google Maps"
+              loading="lazy"
+              referrerPolicy="strict-origin-when-cross-origin"
+              allowFullScreen
+              className="block h-[16rem] w-full border-0 sm:h-[18rem] lg:h-[19rem]"
+            />
+            <span aria-hidden className="pointer-events-none absolute left-0 top-0 h-px w-16 bg-brand-yellow" />
+          </div>
+          <figcaption className="mt-3 text-[0.62rem] font-semibold uppercase tracking-[0.28em] text-brand-soft-blue">
+            Find us
+          </figcaption>
+        </figure>
+      )}
 
       {whatsapp && <WhatsAppCard number={whatsapp} />}
     </div>

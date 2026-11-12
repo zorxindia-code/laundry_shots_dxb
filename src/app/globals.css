@@ -39,8 +39,13 @@ html {
  * (`data-js` is set by an inline script before first paint). If the intro
  * never runs, the fallback animation reveals them after a moment.
  */
+/*
+ * Entrance start states use opacity 0.01 rather than 0: visually identical,
+ * but Chrome only records First/Largest Contentful Paint for content that is
+ * not fully transparent — with 0, Home and Contact reported no FCP/LCP at all.
+ */
 html[data-js] [data-intro] {
-  opacity: 0;
+  opacity: 0.01;
   animation: intro-fallback 0s linear 3.5s forwards;
 }
 
@@ -62,7 +67,7 @@ html:not([data-js]) [data-frames-loader] {
 
 @keyframes page-enter {
   from {
-    opacity: 0;
+    opacity: 0.01;
   }
 }
 
@@ -73,7 +78,7 @@ html:not([data-js]) [data-frames-loader] {
 
 @keyframes nav-enter {
   from {
-    opacity: 0;
+    opacity: 0.01;
     translate: 0 -0.75rem;
   }
 }

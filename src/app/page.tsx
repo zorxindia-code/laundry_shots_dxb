@@ -23,7 +23,7 @@ export const metadata: Metadata = {
 export default function HomePage() {
   return (
     <>
-      <main id="main-content" className="flex-1">
+      <main className="flex-1">
         <HeroSection />
         <BrandStorySection />
         <ServicesPreviewSection />
