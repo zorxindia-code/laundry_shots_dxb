@@ -21,6 +21,12 @@ const nextConfig: NextConfig = {
         source: "/images/laundry-frames/:path*",
         headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
       },
+      {
+        // Optimised frame variants: requested with `?v=<content hash of the
+        // variant>` (src/config/video-frames-optimized.ts) — immutable.
+        source: "/images/laundry-frames-optimized/:path*",
+        headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
+      },
     ];
   },
   turbopack: {

@@ -26,8 +26,25 @@ export interface FrameStoreOptions {
   decodedBudget?: number;
   /** Upper bound for the number of decoded bitmaps (small screens decode small frames). */
   maxBitmaps?: number;
+  /**
+   * Only frames whose index is a multiple of `stride` (plus the last frame) are
+   * ever loaded — a limited-motion mode for constrained devices. Default 1.
+   */
+  stride?: number;
+  /**
+   * Download window around the scroll target (frames ahead / behind in the
+   * scroll direction). `null` (default) streams the whole sequence. Outside
+   * the window only every `coverage`-th frame is fetched, so any position
+   * still has a nearby frame; requests that fall far outside are cancelled.
+   */
+  window?: { ahead: number; behind: number } | null;
+  coverage?: number;
+  /** Natural size of the frame files: decodes at this size skip resampling. */
+  naturalSize?: { width: number; height: number };
   onChange?: () => void;
 }
+
+export type PauseReason = "detached" | "hidden";
 
 const MAX_RETRIES = 3;
 
@@ -39,10 +56,14 @@ export class FrameStore {
   private readonly decodeConcurrency: number;
   private readonly decodedBudget: number;
   private readonly maxBitmaps: number;
+  private readonly stride: number;
+  private readonly window: { ahead: number; behind: number } | null;
+  private readonly coverage: number;
+  private readonly naturalSize?: { width: number; height: number };
   private onChange?: () => void;
 
   private readonly blobs: (Blob | undefined)[];
-  private readonly fetching = new Set<number>();
+  private readonly fetching = new Map<number, AbortController>();
   private readonly failures = new Map<number, number>();
   private readonly bitmaps = new Map<number, ImageBitmap>(); // insertion order = LRU order
   private readonly decoding = new Set<number>();
@@ -54,7 +75,10 @@ export class FrameStore {
   private decodeSize: { width: number; height: number } | null = null;
   private generation = 0; // bumps when the decode size changes
   private disposed = false;
-  private paused = false;
+  private readonly pauses = new Set<PauseReason>();
+
+  /** Decode timing, for adaptive quality decisions. */
+  readonly stats = { decodes: 0, decodeMs: 0 };
 
   loadedCount = 0;
   loadedBytes = 0;
@@ -68,6 +92,10 @@ export class FrameStore {
     this.decodeConcurrency = options.decodeConcurrency ?? 4;
     this.decodedBudget = options.decodedBudget ?? 128 * 1024 * 1024;
     this.maxBitmaps = options.maxBitmaps ?? 48;
+    this.stride = Math.max(1, options.stride ?? 1);
+    this.window = options.window ?? null;
+    this.coverage = Math.max(1, options.coverage ?? 8);
+    this.naturalSize = options.naturalSize;
     this.onChange = options.onChange;
     this.blobs = new Array(this.count);
   }
@@ -90,12 +118,12 @@ export class FrameStore {
   }
 
   /** Stop starting new downloads/decodes (in-flight ones finish). */
-  pause() {
-    this.paused = true;
+  pause(reason: PauseReason = "detached") {
+    this.pauses.add(reason);
   }
 
-  resume() {
-    this.paused = false;
+  resume(reason: PauseReason = "detached") {
+    this.pauses.delete(reason);
     this.pump();
   }
 
@@ -117,7 +145,13 @@ export class FrameStore {
   focus(index: number, direction: number) {
     this.target = this.clamp(index);
     if (direction) this.direction = Math.sign(direction);
+    this.cancelObsolete();
     this.pump();
+  }
+
+  /** Whether frame `index` is part of the loadable set (see `stride`). */
+  loadable(index: number) {
+    return index % this.stride === 0 || index === this.count - 1;
   }
 
   /** The frame playback is currently showing: decodes are prioritised along its path. */
@@ -174,7 +208,7 @@ export class FrameStore {
   /* ---------------------------------------------------------------------- */
 
   private pump() {
-    if (this.disposed || this.paused) return;
+    if (this.disposed || this.pauses.size > 0) return;
     while (this.fetching.size < this.fetchConcurrency) {
       const next = this.nextToFetch();
       if (next === -1) break;
@@ -187,23 +221,39 @@ export class FrameStore {
     }
   }
 
+  /** Whether a non-required frame is worth downloading now (window / coverage). */
+  private wanted(i: number, slack = 1) {
+    if (!this.window || i % this.coverage === 0) return true;
+    const delta = (i - this.target) * this.direction;
+    return delta <= this.window.ahead * slack && delta >= -this.window.behind * slack;
+  }
+
+  /** Cancel in-flight downloads that scrolling has made irrelevant (re-queued if needed later). */
+  private cancelObsolete() {
+    if (!this.window) return;
+    for (const [i, controller] of this.fetching) {
+      if (!this.required.has(i) && !this.wanted(i, 2)) controller.abort();
+    }
+  }
+
   /**
    * Download priority: required frames first (in order), then frames close
    * to the target — ahead in the scroll direction weighted over behind — with
-   * a sparse spread (every 8th frame) pulled forward so fast scrubbing always
-   * has a nearby frame.
+   * a sparse spread (every `coverage`-th frame) pulled forward so fast
+   * scrubbing always has a nearby frame.
    */
   private nextToFetch(): number {
     let best = -1;
     let bestScore = Infinity;
     for (let i = 0; i < this.count; i++) {
-      if (this.blobs[i] || this.fetching.has(i) || (this.failures.get(i) ?? 0) >= MAX_RETRIES) continue;
+      if (!this.loadable(i) || this.blobs[i] || this.fetching.has(i) || (this.failures.get(i) ?? 0) >= MAX_RETRIES) continue;
       let score: number;
       if (this.required.has(i)) score = -1e6 + i;
       else {
+        if (!this.wanted(i)) continue;
         const delta = (i - this.target) * this.direction;
         score = delta >= 0 ? delta : -delta * 2.5;
-        if (i % 8 === 0) score *= 0.3;
+        if (i % this.coverage === 0) score *= 0.3;
       }
       if (score < bestScore) {
         bestScore = score;
@@ -234,9 +284,12 @@ export class FrameStore {
   }
 
   private async fetchFrame(index: number) {
-    this.fetching.add(index);
+    const controller = new AbortController();
+    const onDispose = () => controller.abort();
+    this.abort.signal.addEventListener("abort", onDispose);
+    this.fetching.set(index, controller);
     try {
-      const response = await fetch(this.src(index + 1), { signal: this.abort.signal });
+      const response = await fetch(this.src(index + 1), { signal: controller.signal });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const blob = await response.blob();
       if (this.disposed) return;
@@ -246,9 +299,11 @@ export class FrameStore {
       if (this.required.has(index)) this.requiredLoaded++;
       this.onChange?.();
     } catch (error) {
+      // Cancelled (obsolete or disposed): not a failure; it is re-queued if needed.
       if (this.disposed || (error as Error).name === "AbortError") return;
       this.failures.set(index, (this.failures.get(index) ?? 0) + 1);
     } finally {
+      this.abort.signal.removeEventListener("abort", onDispose);
       this.fetching.delete(index);
       this.pump();
     }
@@ -261,11 +316,13 @@ export class FrameStore {
     const generation = this.generation;
     this.decoding.add(index);
     try {
-      const bitmap = await createImageBitmap(blob, {
-        resizeWidth: size.width,
-        resizeHeight: size.height,
-        resizeQuality: "high",
-      });
+      const native = this.naturalSize && this.naturalSize.width === size.width && this.naturalSize.height === size.height;
+      const started = performance.now();
+      const bitmap = native
+        ? await createImageBitmap(blob)
+        : await createImageBitmap(blob, { resizeWidth: size.width, resizeHeight: size.height, resizeQuality: "high" });
+      this.stats.decodes++;
+      this.stats.decodeMs += performance.now() - started;
       if (this.disposed || generation !== this.generation) {
         bitmap.close();
         return;

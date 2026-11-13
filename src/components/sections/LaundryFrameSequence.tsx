@@ -6,7 +6,9 @@ import { useLayoutEffect, useRef } from "react";
 
 import { Logo } from "@/components/ui/Logo";
 import { journeyStages } from "@/config/journey";
-import { frameSrc, laundryFrames, type FrameBands } from "@/config/video-frames";
+import { laundryFrames, type FrameBands } from "@/config/video-frames";
+import { frameVariants, variantFrameSrc, type FrameVariantId } from "@/config/video-frames-optimized";
+import { getFramePlan, recordStruggle } from "@/lib/frame-quality";
 import { acquireFrameStore, FrameStore, releaseFrameStore } from "@/lib/frame-store";
 import { gsap, ScrollTrigger } from "@/lib/gsap";
 import { cn, formatStep } from "@/lib/utils";
@@ -16,7 +18,9 @@ import { cn, formatStep } from "@/lib/utils";
 /* -------------------------------------------------------------------------- */
 /*
  * The laundry journey video (public/videos/Web.mp4), played frame by frame
- * from its lossless WebP sequence on ONE canvas, driven by scroll:
+ * on ONE canvas, driven by scroll. Frames come from optimised derivatives of
+ * the lossless masters (scripts/optimize-frames.mjs), in the variant that
+ * suits the device (src/lib/frame-quality.ts):
  *
  *   scroll progress p (0 → 1)  ⇒  frame index = p × (count − 1)
  *
@@ -35,13 +39,37 @@ const SCROLL_SVH = 420;
 const FOLLOW = 0.22;
 
 /**
- * Frames needed before the experience becomes interactive: the opening second
- * plus a sparse spread across the sequence (every 12th frame), so any scroll
- * position already has a nearby frame. The rest streams in afterwards.
+ * Loading policy per variant:
+ * - `opening` / `spread`: frames needed before the experience becomes
+ *   interactive — the opening frames plus every `spread`-th frame, so any
+ *   scroll position already has a nearby frame;
+ * - `window`: download window around the scroll position (null = stream the
+ *   whole sequence in the background); `coverage`: spacing of the frames
+ *   fetched outside the window.
  */
-const REQUIRED_FRAMES = Array.from(
-  new Set([...Array.from({ length: 24 }, (_, i) => i), ...Array.from({ length: Math.ceil(FRAME_COUNT / 12) }, (_, k) => Math.min(FRAME_COUNT - 1, k * 12)), FRAME_COUNT - 1]),
-).sort((a, b) => a - b);
+const LOADING: Record<FrameVariantId, { opening: number; spread: number; window: { ahead: number; behind: number } | null; coverage: number }> = {
+  high: { opening: 24, spread: 12, window: null, coverage: 8 },
+  standard: { opening: 12, spread: 24, window: { ahead: 72, behind: 24 }, coverage: 12 },
+  low: { opening: 6, spread: 24, window: { ahead: 36, behind: 12 }, coverage: 24 },
+};
+
+/** Limited-motion mode loads every LITE_STRIDE-th frame only. */
+const LITE_STRIDE = 4;
+
+const requiredFrames = (opening: number, spread: number, loadable: (i: number) => boolean) =>
+  Array.from(
+    new Set([
+      ...Array.from({ length: opening }, (_, i) => i),
+      ...Array.from({ length: Math.ceil(FRAME_COUNT / spread) }, (_, k) => Math.min(FRAME_COUNT - 1, k * spread)),
+      FRAME_COUNT - 1,
+    ]),
+  )
+    .filter(loadable)
+    .sort((a, b) => a - b);
+
+/** Loading slower than this, or decoding slower than this per frame, lowers the tier next visit. */
+const SLOW_READY_MS = 8000;
+const SLOW_DECODE_MS = 40;
 
 /**
  * Decoded-frame memory: at most 128 MB of RGBA bitmaps and 48 frames
@@ -55,21 +83,10 @@ const MIN_FILL_BAND = 12;
 
 const SCENE_LABELS = SCENES.length === journeyStages.length;
 
-/**
- * Content version of the frame set (hash of the generated manifest: sizes,
- * per-frame colour bands, scenes). Frame URLs carry it as `?v=…`, so they can
- * be cached as immutable: regenerated frames get new URLs automatically.
- */
-const FRAME_VERSION = (() => {
-  const text = JSON.stringify([laundryFrames.count, laundryFrames.totalBytes, laundryFrames.subject, laundryFrames.scenes, laundryFrames.bands]);
-  let hash = 0x811c9dc5; // FNV-1a
-  for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193);
-  return (hash >>> 0).toString(36);
-})();
-const versionedFrameSrc = (index: number) => `${frameSrc(index)}?v=${FRAME_VERSION}`;
+/** Poster (first frame, smallest variant): an instant, tiny first visual. */
+const POSTER_SRC = variantFrameSrc(frameVariants.low, 1);
 
-/** Shared frame store key, and how long it survives once no page shows it. */
-const STORE_KEY = `laundry-frames:${FRAME_VERSION}`;
+/** How long the shared frame store survives once no page shows it. */
 const STORE_IDLE_MS = 10 * 60 * 1000;
 /** Decoded frames kept while the page is hidden (the rest are released). */
 const HIDDEN_DECODED = 6;
@@ -141,18 +158,36 @@ export function LaundryFrameSequence() {
     let ready = false;
     let activeScene = -1;
 
+    // Device-appropriate variant, decided once per session (no switching mid-scroll).
+    const plan = getFramePlan();
+    const variant = frameVariants[plan.tier];
+    const policy = LOADING[plan.tier];
+    const stride = plan.lite ? LITE_STRIDE : 1;
+    const loadable = (i: number) => i % stride === 0 || i === FRAME_COUNT - 1;
+    const required = requiredFrames(policy.opening, policy.spread, loadable);
+    const loadableCount = Array.from({ length: FRAME_COUNT }, (_, i) => i).filter(loadable).length;
+    // Snap to loadable frames in limited-motion mode.
+    const snap = (i: number) => (stride === 1 ? i : Math.min(FRAME_COUNT - 1, Math.round(i / stride) * stride));
+    stage.dataset.tier = `${variant.id}${plan.lite ? "+lite" : ""}`;
+    const storeKey = `laundry-frames:${variant.id}:${variant.version}:${stride}`;
+
     // Shared across visits: returning to the page reuses downloaded frames.
     const store = acquireFrameStore(
-      STORE_KEY,
+      storeKey,
       () =>
         new FrameStore({
           count: FRAME_COUNT,
-          src: versionedFrameSrc,
-          required: REQUIRED_FRAMES,
+          src: (index) => variantFrameSrc(variant, index),
+          required,
           decodedBudget: DECODED_BUDGET,
           maxBitmaps: MAX_DECODED,
+          stride,
+          window: policy.window,
+          coverage: policy.coverage,
+          naturalSize: { width: variant.width, height: variant.height },
         }),
     );
+    const startedAt = performance.now();
     const wasReady = store.ready;
     store.setListener(() => {
       updateLoading();
@@ -192,8 +227,9 @@ export function LaundryFrameSequence() {
       rect = { x, y: cssH - h, w, h };
       stage.dataset.rect = [x, rect.y, w, h].map((v) => v.toFixed(2)).join(","); // diagnostics
       // Decode at the drawn size in device pixels (never above the source).
-      const decodeScale = Math.min(1, (w * dpr) / SOURCE_W);
-      store.setDecodeSize(SOURCE_W * decodeScale, SOURCE_H * decodeScale);
+      // Decode at the drawn size in device pixels, never above the variant's size.
+      const decodeScale = Math.min(1, (w * dpr) / variant.width);
+      store.setDecodeSize(variant.width * decodeScale, variant.height * decodeScale);
       if (resized) drawn = -1;
       schedule();
     };
@@ -273,7 +309,7 @@ export function LaundryFrameSequence() {
       if (!ready) return;
       current = reduceMotion ? target : current + (target - current) * FOLLOW;
       if (Math.abs(target - current) < 0.02) current = target;
-      const index = Math.round(current);
+      const index = snap(Math.round(current));
       store.focusPlayback(index);
 
       if (index !== drawn) {
@@ -306,9 +342,13 @@ export function LaundryFrameSequence() {
       const percent = Math.floor((store.requiredLoaded / store.requiredTotal) * 100);
       if (loaderPercent) loaderPercent.textContent = `${percent}%`;
       if (loaderBar) loaderBar.style.transform = `scaleX(${percent / 100})`;
+      // Background-buffer bar: only when the whole sequence streams (honest progress).
       if (buffer) {
-        buffer.style.transform = `scaleX(${store.loadedCount / FRAME_COUNT})`;
-        if (store.loadedCount === FRAME_COUNT) buffer.parentElement?.setAttribute("data-complete", "true");
+        if (policy.window) buffer.parentElement?.setAttribute("data-complete", "true");
+        else {
+          buffer.style.transform = `scaleX(${store.loadedCount / loadableCount})`;
+          if (store.loadedCount >= loadableCount) buffer.parentElement?.setAttribute("data-complete", "true");
+        }
       }
       if (!ready && store.ready) {
         ready = true;
@@ -327,7 +367,11 @@ export function LaundryFrameSequence() {
         }
         current = target; // start exactly where the scroll position is
         schedule();
+        // Measured performance: a slow start lowers the tier for the next visit.
+        if (!wasReady && performance.now() - startedAt > SLOW_READY_MS) recordStruggle(variant.id, "slow loading");
       }
+      const { decodes, decodeMs } = store.stats;
+      if (decodes >= 30 && decodeMs / decodes > SLOW_DECODE_MS) recordStruggle(variant.id, "slow decoding");
     }
 
     /* ---------------- scroll ---------------- */
@@ -356,12 +400,19 @@ export function LaundryFrameSequence() {
     store.resume();
     updateLoading();
 
+    // Background tab: no downloads or decodes until the visitor comes back.
+    const onVisibility = () => (document.hidden ? store.pause("hidden") : store.resume("hidden"));
+    document.addEventListener("visibilitychange", onVisibility);
+    onVisibility();
+
     return () => {
       cancelAnimationFrame(raf);
       resize.disconnect();
       trigger.kill();
       // Hidden or unmounted: keep the downloaded frames for the next visit.
-      releaseFrameStore(STORE_KEY, { idleMs: STORE_IDLE_MS, keepDecoded: HIDDEN_DECODED });
+      document.removeEventListener("visibilitychange", onVisibility);
+      store.resume("hidden");
+      releaseFrameStore(storeKey, { idleMs: STORE_IDLE_MS, keepDecoded: HIDDEN_DECODED });
       if (loader) gsap.killTweensOf(loader);
     };
   }, []);
@@ -386,7 +437,7 @@ export function LaundryFrameSequence() {
         {/* First frame, shown until the canvas paints (no blank stage, no layout shift). */}
         <div data-frames-poster aria-hidden className="absolute inset-0 transition-opacity duration-300">
           <Image
-            src={versionedFrameSrc(1)}
+            src={POSTER_SRC}
             alt=""
             width={SOURCE_W}
             height={SOURCE_H}

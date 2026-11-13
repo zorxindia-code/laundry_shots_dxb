@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { ActiveRowList } from "@/components/animations/ActiveRowList";
 import { ScrollReveal } from "@/components/animations/ScrollReveal";
 import { ButtonArrow } from "@/components/ui/ButtonLink";
 import { Eyebrow } from "@/components/ui/Eyebrow";
@@ -40,11 +41,12 @@ export function ServicesPreviewSection() {
         </ScrollReveal>
       </div>
 
-      <ol>
+      {/* Touch devices: the row in the middle of the screen gets the hover look. */}
+      <ActiveRowList>
         {services.map((service, index) => (
           <ServiceRow key={service.id} service={service} index={index} />
         ))}
-      </ol>
+      </ActiveRowList>
     </section>
   );
 }
@@ -55,6 +57,7 @@ function ServiceRow({ service, index }: { service: Service; index: number }) {
 
   return (
     <li
+      data-active-row
       data-nav-tone={light ? "light" : "navy"}
       className={cn("group relative overflow-hidden", light ? "bg-brand-white text-brand-navy" : "bg-brand-navy text-brand-white")}
     >
@@ -65,10 +68,10 @@ function ServiceRow({ service, index }: { service: Service; index: number }) {
             <span
               aria-hidden
               className={cn(
-                "text-[clamp(4.5rem,11vw,10rem)] font-bold leading-[0.8] tracking-[-0.06em] text-transparent transition-colors duration-700",
+                "text-[clamp(4.5rem,11vw,10rem)] font-bold leading-[0.8] tracking-[-0.06em] text-transparent transition-colors duration-700 motion-reduce:transition-none",
                 light
-                  ? "[-webkit-text-stroke:1.5px_rgb(6_23_94/0.35)] group-hover:text-brand-navy"
-                  : "[-webkit-text-stroke:1.5px_rgb(255_255_255/0.3)] group-hover:text-brand-yellow group-hover:[-webkit-text-stroke-color:transparent]",
+                  ? "[-webkit-text-stroke:1.5px_rgb(6_23_94/0.35)] row-active:text-brand-navy"
+                  : "[-webkit-text-stroke:1.5px_rgb(255_255_255/0.3)] row-active:text-brand-yellow row-active:[-webkit-text-stroke-color:transparent]",
               )}
             >
               {formatStep(index + 1)}
@@ -84,7 +87,7 @@ function ServiceRow({ service, index }: { service: Service; index: number }) {
               <span
                 aria-hidden
                 className={cn(
-                  "mt-6 block h-0.5 w-10 transition-[width] duration-700 group-hover:w-24",
+                  "mt-6 block h-0.5 w-10 transition-[width] duration-700 row-active:w-24 motion-reduce:transition-none",
                   light ? "bg-brand-navy" : "bg-brand-yellow",
                 )}
               />
@@ -99,7 +102,7 @@ function ServiceRow({ service, index }: { service: Service; index: number }) {
                 )}
               >
                 Enquire<span className="sr-only"> about {service.title}</span>
-                <ButtonArrow className="group-hover/link:translate-x-1" />
+                <ButtonArrow className="row-active:translate-x-1 group-hover/link:translate-x-1" />
               </Link>
             </div>
           </div>
@@ -125,7 +128,7 @@ function ServiceRow({ service, index }: { service: Service; index: number }) {
             <div
               data-reveal
               data-reveal-delay="0.1"
-              className="transition-transform duration-700 ease-out group-hover:-translate-y-2 group-hover:scale-[1.03] motion-reduce:transition-none"
+              className="transition-transform duration-700 ease-out row-active:-translate-y-2 row-active:scale-[1.03] motion-reduce:transition-none"
             >
               <ServiceVisual service={service} />
             </div>

@@ -20,6 +20,28 @@ body {
   font-family: var(--font-sans), system-ui, sans-serif;
 }
 
+/*
+ * `row-active:` — the active state of an interactive row (`.group`), shared by
+ * every input so desktop and mobile get identical styling:
+ * - mouse hover, on devices that really hover (same as `group-hover:`);
+ * - `data-active` on the row, set from scroll position / tap on touch
+ *   devices (ActiveRowList);
+ * - keyboard focus inside the row.
+ */
+@custom-variant row-active {
+  @media (hover: hover) {
+    &:where(.group:hover *) {
+      @slot;
+    }
+  }
+  &:where(.group[data-active] *) {
+    @slot;
+  }
+  &:where(.group:has(:focus-visible) *) {
+    @slot;
+  }
+}
+
 /* Hash links (e.g. #enquiry) land below the fixed navigation. */
 html {
   scroll-padding-top: 6rem;
